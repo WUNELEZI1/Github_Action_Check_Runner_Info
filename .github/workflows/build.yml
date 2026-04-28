@@ -1,0 +1,56 @@
+name: Build MT6768 Kernel
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: Checkout kernel
+      uses: actions/checkout@v4
+
+    - name: Install deps
+      run: |
+        sudo apt update
+        sudo apt install -y bc bison flex libssl-dev \
+        make libc6-dev libncurses5-dev python3
+
+    - name: Clone clang
+      run: |
+        git clone --depth=1 https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 clang
+
+    - name: Clone KernelSU
+      run: |
+        git clone https://github.com/tiann/KernelSU
+        cd KernelSU
+        git checkout v0.9.5
+
+    - name: Apply KernelSU
+      run: |
+        patch -p1 < KernelSU/kernel/patches/kernelsu.patch || true
+
+    - name: Build
+      run: |
+        export ARCH=arm64
+        export SUBARCH=arm64
+
+        export PATH=$PWD/clang/bin:$PATH
+        export CC=clang
+        export CROSS_COMPILE=aarch64-linux-android-
+
+        make gigaset_mt6768_defconfig
+
+        # 降低 MTK 炸的概率
+        scripts/config --disable LTO || true
+        scripts/config --disable DEBUG_INFO || true
+
+        make -j4
+
+    - name: Upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernel
+        path: |
+          **/Image*
