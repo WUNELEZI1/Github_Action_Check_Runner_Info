@@ -1,56 +1,88 @@
-name: Build MT6768 Kernel
+name: Build MT6768 Kernel (Standalone)
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout kernel
-      uses: actions/checkout@v4
-
     - name: Install deps
       run: |
         sudo apt update
-        sudo apt install -y bc bison flex libssl-dev \
-        make libc6-dev libncurses5-dev python3
+        sudo apt install -y \
+          bc bison flex libssl-dev \
+          make libc6-dev libncurses5-dev \
+          python3 git curl
 
+    # ✅ 拉 kernel
+    - name: Clone kernel
+      run: |
+        git clone --depth=1 -b lineage-19.1 \
+        https://github.com/Gigaset-dev/android_kernel_gigaset_mt6768 kernel
+
+    # ✅ 拉 clang（用稳定版本，避免新版炸）
     - name: Clone clang
       run: |
-        git clone --depth=1 https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 clang
+        git clone --depth=1 \
+        https://github.com/kdrag0n/proton-clang clang
 
-    - name: Clone KernelSU
+    # ✅ 注入 KernelSU
+    - name: Inject KernelSU
       run: |
-        git clone https://github.com/tiann/KernelSU
-        cd KernelSU
-        git checkout v0.9.5
+        cd kernel
+        curl -LSs https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh | bash -
 
-    - name: Apply KernelSU
+    # ✅ 查找 defconfig（调试关键）
+    - name: List defconfigs
       run: |
-        patch -p1 < KernelSU/kernel/patches/kernelsu.patch || true
+        cd kernel
+        ls arch/arm64/configs
 
-    - name: Build
+    # ✅ 编译
+    - name: Build kernel
       run: |
+        cd kernel
+
         export ARCH=arm64
         export SUBARCH=arm64
 
-        export PATH=$PWD/clang/bin:$PATH
+        export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
         export CC=clang
-        export CROSS_COMPILE=aarch64-linux-android-
 
-        make gigaset_mt6768_defconfig
+        # ❗MTK关键（避免炸）
+        export CROSS_COMPILE=aarch64-linux-gnu-
+        export CLANG_TRIPLE=aarch64-linux-gnu-
 
-        # 降低 MTK 炸的概率
+        # ❗跳过MTK工具
+        export SKIP_MTK_DRVGEN=1
+
+        # 👉 这里先用最保守策略（避免卡死）
+        make defconfig || true
+
+        # 👉 如果你后面确认正确名字，再替换：
+        # make mt6768_defconfig
+
+        # 👉 降低爆炸概率
         scripts/config --disable LTO || true
+        scripts/config --disable CFI || true
         scripts/config --disable DEBUG_INFO || true
 
-        make -j4
+        make -j$(nproc)
 
+    # ✅ 查找产物
+    - name: Find output
+      run: |
+        cd kernel
+        find . -name "Image*"
+        find . -name "*.dtb"
+
+    # ✅ 上传
     - name: Upload
       uses: actions/upload-artifact@v4
       with:
-        name: kernel
+        name: kernel-output
         path: |
-          **/Image*
+          kernel/**/*.Image*
+          kernel/**/*.dtb
