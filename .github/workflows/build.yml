@@ -5,58 +5,59 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
-    - name: Install deps
-      run: |
-        sudo apt update
-        sudo apt install -y \
-          bc bison flex libssl-dev make libc6-dev \
-          libncurses-dev python3 git curl \
-          gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            bc bison build-essential curl flex git kmod libssl-dev \
+            libelf-dev libncurses-dev python3 dwarves \
+            clang lld \
+            gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
-    - name: Clone kernel
-      run: |
-        git clone --depth=1 -b lineage-19.1 \
-        https://github.com/Gigaset-dev/android_kernel_gigaset_mt6768 kernel
+      - name: Clone kernel
+        run: |
+          git clone --depth=1 -b lineage-19.1 https://github.com/Gigaset-dev/android_kernel_gigaset_mt6768 kernel
 
-    - name: Clone clang (Proton)
-      run: |
-        git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
+      - name: Setup KernelSU
+        run: |
+          cd kernel
+          git clone https://github.com/tiann/KernelSU
+          cd KernelSU
+          git checkout v3.2.4
+          cd ..
+          ln -sf KernelSU/kernel kernelsu
+          sed -i '/menu "General setup"/a source "kernelsu/Kconfig"' Kconfig
+          sed -i '/core-y/a core-y += kernelsu/' Makefile
 
-    - name: Setup KernelSU
-      run: |
-        cd kernel
-        curl -LSs https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh | bash -
+      - name: Build kernel
+        run: |
+          cd kernel
 
-    - name: Build
-      run: |
-        export ARCH=arm64
-        export SUBARCH=arm64
+          export ARCH=arm64
+          export SUBARCH=arm64
 
-        export CLANG_PATH=$GITHUB_WORKSPACE/clang/bin
-        export PATH=$CLANG_PATH:$PATH
+          export CC=clang
+          export CLANG_TRIPLE=aarch64-linux-gnu-
 
-        export CROSS_COMPILE=aarch64-linux-gnu-
-        export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
 
-        cd kernel
+          export LD=ld.lld
+          export AR=llvm-ar
+          export NM=llvm-nm
+          export OBJCOPY=llvm-objcopy
+          export OBJDUMP=llvm-objdump
+          export STRIP=llvm-strip
 
-        # 你的defconfig
-        make O=out k69v1_64_k419_defconfig
+          mkdir -p out
+          make O=out k69v1_64_k419_defconfig
+          make -j$(nproc) O=out
 
-        make -j$(nproc --all) O=out \
-          CC=clang \
-          LD=ld.lld \
-          AR=llvm-ar \
-          NM=llvm-nm \
-          OBJCOPY=llvm-objcopy \
-          OBJDUMP=llvm-objdump \
-          STRIP=llvm-strip
-
-    - name: Upload Image
-      uses: actions/upload-artifact@v4
-      with:
-        name: kernel
-        path: kernel/out/arch/arm64/boot/Image*
+      - name: Upload Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-image
+          path: kernel/out/arch/arm64/boot/Image*
