@@ -1,4 +1,4 @@
-name: Build MT6768 Kernel (Standalone)
+name: Build KernelSU
 
 on:
   workflow_dispatch:
@@ -12,77 +12,51 @@ jobs:
       run: |
         sudo apt update
         sudo apt install -y \
-          bc bison flex libssl-dev \
-          make libc6-dev libncurses5-dev \
-          python3 git curl
+          bc bison flex libssl-dev make libc6-dev \
+          libncurses-dev python3 git curl \
+          gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
 
-    # ✅ 拉 kernel
     - name: Clone kernel
       run: |
         git clone --depth=1 -b lineage-19.1 \
         https://github.com/Gigaset-dev/android_kernel_gigaset_mt6768 kernel
 
-    # ✅ 拉 clang（用稳定版本，避免新版炸）
-    - name: Clone clang
+    - name: Clone clang (Proton)
       run: |
-        git clone --depth=1 \
-        https://github.com/kdrag0n/proton-clang clang
+        git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
 
-    # ✅ 注入 KernelSU
-    - name: Inject KernelSU
+    - name: Setup KernelSU
       run: |
         cd kernel
         curl -LSs https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh | bash -
 
-    # ✅ 查找 defconfig（调试关键）
-    - name: List defconfigs
+    - name: Build
       run: |
-        cd kernel
-        ls arch/arm64/configs
-
-    # ✅ 编译
-    - name: Build kernel
-      run: |
-        cd kernel
-
         export ARCH=arm64
         export SUBARCH=arm64
 
-        export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
-        export CC=clang
+        export CLANG_PATH=$GITHUB_WORKSPACE/clang/bin
+        export PATH=$CLANG_PATH:$PATH
 
-        # ❗MTK关键（避免炸）
         export CROSS_COMPILE=aarch64-linux-gnu-
-        export CLANG_TRIPLE=aarch64-linux-gnu-
+        export CROSS_COMPILE_ARM32=arm-linux-gnueabi-
 
-        # ❗跳过MTK工具
-        export SKIP_MTK_DRVGEN=1
-
-        # 👉 这里先用最保守策略（避免卡死）
-        make defconfig || true
-
-        # 👉 如果你后面确认正确名字，再替换：
-        # make mt6768_defconfig
-
-        # 👉 降低爆炸概率
-        scripts/config --disable LTO || true
-        scripts/config --disable CFI || true
-        scripts/config --disable DEBUG_INFO || true
-
-        make -j$(nproc)
-
-    # ✅ 查找产物
-    - name: Find output
-      run: |
         cd kernel
-        find . -name "Image*"
-        find . -name "*.dtb"
 
-    # ✅ 上传
-    - name: Upload
+        # 你的defconfig
+        make O=out k69v1_64_k419_defconfig
+
+        make -j$(nproc --all) O=out \
+          CC=clang \
+          LD=ld.lld \
+          AR=llvm-ar \
+          NM=llvm-nm \
+          OBJCOPY=llvm-objcopy \
+          OBJDUMP=llvm-objdump \
+          STRIP=llvm-strip
+
+    - name: Upload Image
       uses: actions/upload-artifact@v4
       with:
-        name: kernel-output
-        path: |
-          kernel/**/*.Image*
-          kernel/**/*.dtb
+        name: kernel
+        path: kernel/out/arch/arm64/boot/Image*
