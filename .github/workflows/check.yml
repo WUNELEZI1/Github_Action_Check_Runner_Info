@@ -1,67 +1,32 @@
-name: Runner Info Check
+name: Check Runner
 
 on:
   workflow_dispatch:
 
 jobs:
-  info:
-    runs-on: ubuntu-lateset
+  check:
+    runs-on: ubuntu-latest
 
     steps:
-    - name: Basic system info
-      run: |
-        echo "==== OS ===="
-        uname -a
+      - name: System Info
+        run: |
+          echo "==== CPU ===="
+          nproc
+          lscpu
 
-        echo "==== CPU ===="
-        lscpu
+          echo "==== Memory ===="
+          free -h
 
-        echo "==== Memory ===="
-        free -h
+          echo "==== Disk ===="
+          df -h
 
-        echo "==== Disk ===="
-        df -h
+      - name: CPU load test
+        run: |
+          echo "==== CPU load test ===="
+          for i in {1..2}; do sha1sum /dev/zero & done
+          sleep 5
 
-    - name: Detailed CPU test
-      run: |
-        echo "==== CPU threads ===="
-        nproc
-
-        echo "==== CPU benchmark (simple) ===="
-        time bash -c "for i in {1..5000000}; do :; done"
-
-    - name: IO test
-      run: |
-        echo "==== Disk write test ===="
-        dd if=/dev/zero of=test.img bs=1M count=1024 oflag=direct
-
-    - name: Check toolchain env
-      run: |
-        echo "==== GCC ===="
-        gcc --version || true
-
-        echo "==== Clang ===="
-        clang --version || true
-
-        echo "==== Python ===="
-        python3 --version
-
-    - name: Memory stress (important)
-      run: |
-        echo "==== Memory stress test ===="
-        python3 - <<EOF
-a = []
-try:
-    for i in range(10**8):
-        a.append(i)
-except MemoryError:
-    print("Memory limit reached")
-EOF
-
-    - name: Upload full log
-      uses: actions/upload-artifact@v4
-      with:
-        name: runner-log
-        path: |
-          /proc/cpuinfo
-          /proc/meminfo
+      - name: Ulimit
+        run: |
+          echo "==== Ulimit ===="
+          ulimit -a
